@@ -873,7 +873,6 @@ func TestGarbageCollectorSync(t *testing.T) {
 	go gc.Sync(fakeDiscoveryClient, 200*time.Millisecond, stopCh)
 
 	// Wait until the sync discovers the initial resources
-	fmt.Printf("Test output")
 	time.Sleep(1 * time.Second)
 
 	err = expectSyncNotBlocked(fakeDiscoveryClient, &gc.workerLock)
@@ -948,8 +947,13 @@ func (_ *fakeServerResources) ServerResourcesForGroupVersion(groupVersion string
 	return nil, nil
 }
 
+// Deprecated: use ServerGroupsAndResources instead.
 func (_ *fakeServerResources) ServerResources() ([]*metav1.APIResourceList, error) {
 	return nil, nil
+}
+
+func (_ *fakeServerResources) ServerGroupsAndResources() ([]*metav1.APIGroup, []*metav1.APIResourceList, error) {
+	return nil, nil, nil
 }
 
 func (f *fakeServerResources) ServerPreferredResources() ([]*metav1.APIResourceList, error) {

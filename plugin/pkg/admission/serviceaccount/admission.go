@@ -37,6 +37,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/component-base/featuregate"
 	podutil "k8s.io/kubernetes/pkg/api/pod"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	kubefeatures "k8s.io/kubernetes/pkg/features"
@@ -88,7 +89,7 @@ type serviceAccount struct {
 
 	generateName func(string) string
 
-	featureGate utilfeature.FeatureGate
+	featureGate featuregate.FeatureGate
 }
 
 var _ admission.MutationInterface = &serviceAccount{}
@@ -118,37 +119,37 @@ func NewServiceAccount() *serviceAccount {
 	}
 }
 
-func (a *serviceAccount) SetExternalKubeClientSet(cl kubernetes.Interface) {
-	a.client = cl
+func (s *serviceAccount) SetExternalKubeClientSet(cl kubernetes.Interface) {
+	s.client = cl
 }
 
-func (a *serviceAccount) SetExternalKubeInformerFactory(f informers.SharedInformerFactory) {
+func (s *serviceAccount) SetExternalKubeInformerFactory(f informers.SharedInformerFactory) {
 	serviceAccountInformer := f.Core().V1().ServiceAccounts()
-	a.serviceAccountLister = serviceAccountInformer.Lister()
+	s.serviceAccountLister = serviceAccountInformer.Lister()
 
 	secretInformer := f.Core().V1().Secrets()
-	a.secretLister = secretInformer.Lister()
+	s.secretLister = secretInformer.Lister()
 
-	a.SetReadyFunc(func() bool {
+	s.SetReadyFunc(func() bool {
 		return serviceAccountInformer.Informer().HasSynced() && secretInformer.Informer().HasSynced()
 	})
 }
 
 // ValidateInitialization ensures an authorizer is set.
-func (a *serviceAccount) ValidateInitialization() error {
-	if a.client == nil {
+func (s *serviceAccount) ValidateInitialization() error {
+	if s.client == nil {
 		return fmt.Errorf("missing client")
 	}
-	if a.secretLister == nil {
+	if s.secretLister == nil {
 		return fmt.Errorf("missing secretLister")
 	}
-	if a.serviceAccountLister == nil {
+	if s.serviceAccountLister == nil {
 		return fmt.Errorf("missing serviceAccountLister")
 	}
 	return nil
 }
 
-func (s *serviceAccount) Admit(a admission.Attributes) (err error) {
+func (s *serviceAccount) Admit(a admission.Attributes, o admission.ObjectInterfaces) (err error) {
 	if shouldIgnore(a) {
 		return nil
 	}
@@ -159,7 +160,7 @@ func (s *serviceAccount) Admit(a admission.Attributes) (err error) {
 	// That makes the kubelet very angry and confused, and it immediately deletes the pod (because the spec doesn't match)
 	// That said, don't allow mirror pods to reference ServiceAccounts or SecretVolumeSources either
 	if _, isMirrorPod := pod.Annotations[api.MirrorPodAnnotationKey]; isMirrorPod {
-		return s.Validate(a)
+		return s.Validate(a, o)
 	}
 
 	// Set the default service account if needed
@@ -186,10 +187,10 @@ func (s *serviceAccount) Admit(a admission.Attributes) (err error) {
 		}
 	}
 
-	return s.Validate(a)
+	return s.Validate(a, o)
 }
 
-func (s *serviceAccount) Validate(a admission.Attributes) (err error) {
+func (s *serviceAccount) Validate(a admission.Attributes, o admission.ObjectInterfaces) (err error) {
 	if shouldIgnore(a) {
 		return nil
 	}
@@ -304,7 +305,7 @@ func (s *serviceAccount) getServiceAccount(namespace string, name string) (*core
 		if i != 0 {
 			time.Sleep(retryInterval)
 		}
-		serviceAccount, err := s.client.Core().ServiceAccounts(namespace).Get(name, metav1.GetOptions{})
+		serviceAccount, err := s.client.CoreV1().ServiceAccounts(namespace).Get(name, metav1.GetOptions{})
 		if err == nil {
 			return serviceAccount, nil
 		}

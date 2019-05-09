@@ -34,7 +34,10 @@ data:
   Corefile: |
     __PILLAR__DNS__DOMAIN__:53 {
         errors
-        cache 30
+        cache {
+                success 9984 30
+                denial 9984 5
+        }
         reload
         loop
         bind __PILLAR__LOCAL__DNS__
@@ -108,7 +111,7 @@ spec:
         operator: "Exists"
       containers:
       - name: node-cache
-        image: k8s.gcr.io/k8s-dns-node-cache:1.15.0
+        image: k8s.gcr.io/k8s-dns-node-cache:1.15.2
         resources:
           limits:
             memory: 30Mi

@@ -27,7 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
-	utilnet "k8s.io/kubernetes/pkg/util/net"
+	utilnet "k8s.io/utils/net"
 
 	"k8s.io/klog"
 )
@@ -191,4 +191,47 @@ func LogAndEmitIncorrectIPVersionEvent(recorder record.EventRecorder, fieldName,
 				UID:       svcUID,
 			}, v1.EventTypeWarning, "KubeProxyIncorrectIPVersion", errMsg)
 	}
+}
+
+// FilterIncorrectIPVersion filters out the incorrect IP version case from a slice of IP strings.
+func FilterIncorrectIPVersion(ipStrings []string, isIPv6Mode bool) ([]string, []string) {
+	return filterWithCondition(ipStrings, isIPv6Mode, utilnet.IsIPv6String)
+}
+
+// FilterIncorrectCIDRVersion filters out the incorrect IP version case from a slice of CIDR strings.
+func FilterIncorrectCIDRVersion(ipStrings []string, isIPv6Mode bool) ([]string, []string) {
+	return filterWithCondition(ipStrings, isIPv6Mode, utilnet.IsIPv6CIDRString)
+}
+
+func filterWithCondition(strs []string, expectedCondition bool, conditionFunc func(string) bool) ([]string, []string) {
+	var corrects, incorrects []string
+	for _, str := range strs {
+		if conditionFunc(str) != expectedCondition {
+			incorrects = append(incorrects, str)
+		} else {
+			corrects = append(corrects, str)
+		}
+	}
+	return corrects, incorrects
+}
+
+// AppendPortIfNeeded appends the given port to IP address unless it is already in
+// "ipv4:port" or "[ipv6]:port" format.
+func AppendPortIfNeeded(addr string, port int32) string {
+	// Return if address is already in "ipv4:port" or "[ipv6]:port" format.
+	if _, _, err := net.SplitHostPort(addr); err == nil {
+		return addr
+	}
+
+	// Simply return for invalid case. This should be caught by validation instead.
+	ip := net.ParseIP(addr)
+	if ip == nil {
+		return addr
+	}
+
+	// Append port to address.
+	if ip.To4() != nil {
+		return fmt.Sprintf("%s:%d", addr, port)
+	}
+	return fmt.Sprintf("[%s]:%d", addr, port)
 }

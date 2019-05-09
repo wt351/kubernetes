@@ -34,7 +34,7 @@ import (
 	Induce stress to create volumes in parallel with multiple threads based on user configurable values for number of threads and iterations per thread.
 	The following actions will be performed as part of this test.
 
-	1. Create Storage Classes of 4 Categories (Default, SC with Non Default Datastore, SC with SPBM Policy, SC with VSAN Storage Capalibilies.)
+	1. Create Storage Classes of 4 Categories (Default, SC with Non Default Datastore, SC with SPBM Policy, SC with VSAN Storage Capabilities.)
 	2. READ VCP_STRESS_INSTANCES, VCP_STRESS_ITERATIONS, VSPHERE_SPBM_POLICY_NAME and VSPHERE_DATASTORE from System Environment.
 	3. Launch goroutine for volume lifecycle operations.
 	4. Each instance of routine iterates for n times, where n is read from system env - VCP_STRESS_ITERATIONS
@@ -69,7 +69,7 @@ var _ = utils.SIGDescribe("vsphere cloud provider stress [Feature:vsphere]", fun
 		Expect(instances > len(scNames)).To(BeTrue(), "VCP_STRESS_INSTANCES should be greater than 3 to utilize all 4 types of storage classes")
 
 		iterations = GetAndExpectIntEnvVar(VCPStressIterations)
-		Expect(err).NotTo(HaveOccurred(), "Error Parsing VCP_STRESS_ITERATIONS")
+		framework.ExpectNoError(err, "Error Parsing VCP_STRESS_ITERATIONS")
 		Expect(iterations > 0).To(BeTrue(), "VCP_STRESS_ITERATIONS should be greater than 0")
 
 		policyName = GetAndExpectStringEnvVar(SPBMPolicyName)
@@ -85,26 +85,26 @@ var _ = utils.SIGDescribe("vsphere cloud provider stress [Feature:vsphere]", fun
 			var err error
 			switch scname {
 			case storageclass1:
-				sc, err = client.StorageV1().StorageClasses().Create(getVSphereStorageClassSpec(storageclass1, nil))
+				sc, err = client.StorageV1().StorageClasses().Create(getVSphereStorageClassSpec(storageclass1, nil, nil))
 			case storageclass2:
 				var scVSanParameters map[string]string
 				scVSanParameters = make(map[string]string)
 				scVSanParameters[Policy_HostFailuresToTolerate] = "1"
-				sc, err = client.StorageV1().StorageClasses().Create(getVSphereStorageClassSpec(storageclass2, scVSanParameters))
+				sc, err = client.StorageV1().StorageClasses().Create(getVSphereStorageClassSpec(storageclass2, scVSanParameters, nil))
 			case storageclass3:
 				var scSPBMPolicyParameters map[string]string
 				scSPBMPolicyParameters = make(map[string]string)
 				scSPBMPolicyParameters[SpbmStoragePolicy] = policyName
-				sc, err = client.StorageV1().StorageClasses().Create(getVSphereStorageClassSpec(storageclass3, scSPBMPolicyParameters))
+				sc, err = client.StorageV1().StorageClasses().Create(getVSphereStorageClassSpec(storageclass3, scSPBMPolicyParameters, nil))
 			case storageclass4:
 				var scWithDSParameters map[string]string
 				scWithDSParameters = make(map[string]string)
 				scWithDSParameters[Datastore] = datastoreName
-				scWithDatastoreSpec := getVSphereStorageClassSpec(storageclass4, scWithDSParameters)
+				scWithDatastoreSpec := getVSphereStorageClassSpec(storageclass4, scWithDSParameters, nil)
 				sc, err = client.StorageV1().StorageClasses().Create(scWithDatastoreSpec)
 			}
 			Expect(sc).NotTo(BeNil())
-			Expect(err).NotTo(HaveOccurred())
+			framework.ExpectNoError(err)
 			defer client.StorageV1().StorageClasses().Delete(scname, nil)
 			scArrays[index] = sc
 		}
@@ -129,26 +129,26 @@ func PerformVolumeLifeCycleInParallel(f *framework.Framework, client clientset.I
 		logPrefix := fmt.Sprintf("Instance: [%v], Iteration: [%v] :", instanceId, iterationCount+1)
 		By(fmt.Sprintf("%v Creating PVC using the Storage Class: %v", logPrefix, sc.Name))
 		pvclaim, err := framework.CreatePVC(client, namespace, getVSphereClaimSpecWithStorageClass(namespace, "1Gi", sc))
-		Expect(err).NotTo(HaveOccurred())
+		framework.ExpectNoError(err)
 		defer framework.DeletePersistentVolumeClaim(client, pvclaim.Name, namespace)
 
 		var pvclaims []*v1.PersistentVolumeClaim
 		pvclaims = append(pvclaims, pvclaim)
 		By(fmt.Sprintf("%v Waiting for claim: %v to be in bound phase", logPrefix, pvclaim.Name))
 		persistentvolumes, err := framework.WaitForPVClaimBoundPhase(client, pvclaims, framework.ClaimProvisionTimeout)
-		Expect(err).NotTo(HaveOccurred())
+		framework.ExpectNoError(err)
 
 		By(fmt.Sprintf("%v Creating Pod using the claim: %v", logPrefix, pvclaim.Name))
 		// Create pod to attach Volume to Node
 		pod, err := framework.CreatePod(client, namespace, nil, pvclaims, false, "")
-		Expect(err).NotTo(HaveOccurred())
+		framework.ExpectNoError(err)
 
 		By(fmt.Sprintf("%v Waiting for the Pod: %v to be in the running state", logPrefix, pod.Name))
 		Expect(f.WaitForPodRunningSlow(pod.Name)).NotTo(HaveOccurred())
 
 		// Get the copy of the Pod to know the assigned node name.
 		pod, err = client.CoreV1().Pods(namespace).Get(pod.Name, metav1.GetOptions{})
-		Expect(err).NotTo(HaveOccurred())
+		framework.ExpectNoError(err)
 
 		By(fmt.Sprintf("%v Verifing the volume: %v is attached to the node VM: %v", logPrefix, persistentvolumes[0].Spec.VsphereVolume.VolumePath, pod.Spec.NodeName))
 		isVolumeAttached, verifyDiskAttachedError := diskIsAttached(persistentvolumes[0].Spec.VsphereVolume.VolumePath, pod.Spec.NodeName)
@@ -160,11 +160,11 @@ func PerformVolumeLifeCycleInParallel(f *framework.Framework, client clientset.I
 
 		By(fmt.Sprintf("%v Deleting pod: %v", logPrefix, pod.Name))
 		err = framework.DeletePodWithWait(f, client, pod)
-		Expect(err).NotTo(HaveOccurred())
+		framework.ExpectNoError(err)
 
 		By(fmt.Sprintf("%v Waiting for volume: %v to be detached from the node: %v", logPrefix, persistentvolumes[0].Spec.VsphereVolume.VolumePath, pod.Spec.NodeName))
 		err = waitForVSphereDiskToDetach(persistentvolumes[0].Spec.VsphereVolume.VolumePath, pod.Spec.NodeName)
-		Expect(err).NotTo(HaveOccurred())
+		framework.ExpectNoError(err)
 
 		By(fmt.Sprintf("%v Deleting the Claim: %v", logPrefix, pvclaim.Name))
 		Expect(framework.DeletePersistentVolumeClaim(client, pvclaim.Name, namespace)).NotTo(HaveOccurred())

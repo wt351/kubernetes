@@ -20,7 +20,7 @@ KUBE_VERBOSE="${KUBE_VERBOSE:-5}"
 # Handler for when we exit automatically on an error.
 # Borrowed from https://gist.github.com/ahendrix/7030300
 kube::log::errexit() {
-  local err="${PIPESTATUS[@]}"
+  local err="${PIPESTATUS[*]}"
 
   # If the shell we are in doesn't have errexit set (common in subshells) then
   # don't dump stacks.
@@ -28,7 +28,7 @@ kube::log::errexit() {
 
   set +o xtrace
   local code="${1:-1}"
-  # Print out the stack trace described by $function_stack  
+  # Print out the stack trace described by $function_stack
   if [ ${#FUNCNAME[@]} -gt 2 ]
   then
     kube::log::error "Call tree:"
@@ -36,7 +36,7 @@ kube::log::errexit() {
     do
       kube::log::error " ${i}: ${BASH_SOURCE[${i}+1]}:${BASH_LINENO[${i}]} ${FUNCNAME[${i}]}(...)"
     done
-  fi  
+  fi
   kube::log::error_exit "Error in ${BASH_SOURCE[1]}:${BASH_LINENO[0]}. '${BASH_COMMAND}' exited with status ${err}" "${1:-1}" 1
 }
 
@@ -60,7 +60,7 @@ kube::log::stack() {
   if [[ ${#FUNCNAME[@]} -gt ${stack_skip} ]]; then
     echo "Call stack:" >&2
     local i
-    for ((i=1 ; i <= ${#FUNCNAME[@]} - ${stack_skip} ; i++))
+    for ((i=1 ; i <= ${#FUNCNAME[@]} - stack_skip ; i++))
     do
       local frame_no=$((i - 1 + stack_skip))
       local source_file=${BASH_SOURCE[${frame_no}]}
