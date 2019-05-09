@@ -65,12 +65,12 @@ func (m *BaseControllerRefManager) CanAdopt() error {
 // No reconciliation will be attempted if the controller is being deleted.
 func (m *BaseControllerRefManager) ClaimObject(obj metav1.Object, match func(metav1.Object) bool, adopt, release func(metav1.Object) error) (bool, error) {
 	controllerRef := metav1.GetControllerOf(obj)
-	if controllerRef != nil {
-		if controllerRef.UID != m.Controller.GetUID() {
+	if controllerRef != nil { //pod已被控制器收养
+		if controllerRef.UID != m.Controller.GetUID() { //是否同一个控制器，如果不是同一个控制器，则宣告失败
 			// Owned by someone else. Ignore.
 			return false, nil
 		}
-		if match(obj) {
+		if match(obj) { //是否匹配。 已收养且匹配，就返回true。无需其他动作，宣告成功
 			// We already own it and the selector matches.
 			// Return true (successfully claimed) before checking deletion timestamp.
 			// We're still allowed to claim things we already own while being deleted
@@ -79,9 +79,11 @@ func (m *BaseControllerRefManager) ClaimObject(obj metav1.Object, match func(met
 		}
 		// Owned by us but selector doesn't match.
 		// Try to release, unless we're being deleted.
+		// 已收养，但是现在已经不匹配。理论上我们要释放这个pod。但如果控制器已经设置了删除时间，那就无需释放，直接宣告失败
 		if m.Controller.GetDeletionTimestamp() != nil {
 			return false, nil
 		}
+		// 已收养，释放。宣告失败
 		if err := release(obj); err != nil {
 			// If the pod no longer exists, ignore the error.
 			if errors.IsNotFound(err) {
@@ -95,16 +97,18 @@ func (m *BaseControllerRefManager) ClaimObject(obj metav1.Object, match func(met
 		return false, nil
 	}
 
-	// It's an orphan.
+	// It's an orphan. pod未被控制器收养
+	// 控制器已设置了删除时间或pod不匹配。 不收养。宣告失败
 	if m.Controller.GetDeletionTimestamp() != nil || !match(obj) {
 		// Ignore if we're being deleted or selector doesn't match.
 		return false, nil
 	}
+	//pod已设置了删除时间。不收养。宣告失败
 	if obj.GetDeletionTimestamp() != nil {
 		// Ignore if the object is being deleted
 		return false, nil
 	}
-	// Selector matches. Try to adopt.
+	// Selector matches. Try to adopt. 尝试收养
 	if err := adopt(obj); err != nil {
 		// If the pod no longer exists, ignore the error.
 		if errors.IsNotFound(err) {
@@ -156,11 +160,11 @@ func NewPodControllerRefManager(
 // ClaimPods tries to take ownership of a list of Pods.
 //
 // It will reconcile the following:
-//   * Adopt orphans if the selector matches.
-//   * Release owned objects if the selector no longer matches.
+//   * Adopt orphans if the selector matches.  收养selector匹配的孤儿
+//   * Release owned objects if the selector no longer matches. 释放selector不再匹配的对象
 //
 // Optional: If one or more filters are specified, a Pod will only be claimed if
-// all filters return true.
+// all filters return true. 如果指定了多个filter，那么pod必需符合所有的filter
 //
 // A non-nil error is returned if some form of reconciliation was attempted and
 // failed. Usually, controllers should try again later in case reconciliation
@@ -168,6 +172,9 @@ func NewPodControllerRefManager(
 //
 // If the error is nil, either the reconciliation succeeded, or no
 // reconciliation was necessary. The list of Pods that you now own is returned.
+// 1.检查pod是否匹配selector
+// 2.filter过滤pod
+// 3.
 func (m *PodControllerRefManager) ClaimPods(pods []*v1.Pod, filters ...func(*v1.Pod) bool) ([]*v1.Pod, error) {
 	var claimed []*v1.Pod
 	var errlist []error

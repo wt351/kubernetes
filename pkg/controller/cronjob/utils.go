@@ -34,7 +34,8 @@ import (
 // Utilities for dealing with Jobs and CronJobs and time.
 
 func inActiveList(sj batchv1beta1.CronJob, uid types.UID) bool {
-	for _, j := range sj.Status.Active {
+	//sj.Status.Active中存着指向正在运行(running)的jobs
+	for _, j := range sj.Status.Active { //遍历,
 		if j.UID == uid {
 			return true
 		}
@@ -73,6 +74,7 @@ func getParentUIDFromJob(j batchv1.Job) (types.UID, bool) {
 
 // groupJobsByParent groups jobs into a map keyed by the job parent UID (e.g. scheduledJob).
 // It has no receiver, to facilitate testing.
+// 把Job分入cronJob。
 func groupJobsByParent(js []batchv1.Job) map[types.UID][]batchv1.Job {
 	jobsBySj := make(map[types.UID][]batchv1.Job)
 	for _, job := range js {
@@ -90,17 +92,20 @@ func groupJobsByParent(js []batchv1.Job) map[types.UID][]batchv1.Job {
 //
 // If there are too many (>100) unstarted times, just give up and return an empty slice.
 // If there were missed times prior to the last known start time, then those are not returned.
+// 获得Job应当启动却没有启动的时间序列，从最远到最近。
 func getRecentUnmetScheduleTimes(sj batchv1beta1.CronJob, now time.Time) ([]time.Time, error) {
 	starts := []time.Time{}
+	//解析sj.Spec.Schedule
 	sched, err := cron.ParseStandard(sj.Spec.Schedule)
 	if err != nil {
 		return starts, fmt.Errorf("Unparseable schedule: %s : %s", sj.Spec.Schedule, err)
 	}
 
 	var earliestTime time.Time
+	// sj.Status.LastScheduleTime是最近一次成功调度的时间
 	if sj.Status.LastScheduleTime != nil {
 		earliestTime = sj.Status.LastScheduleTime.Time
-	} else {
+	} else { //若获取不到最近一次成功调度的时间，把cronjob的创建作为最早时间
 		// If none found, then this is either a recently created scheduledJob,
 		// or the active/completed info was somehow lost (contract for status
 		// in kubernetes says it may need to be recreated), or that we have
@@ -109,10 +114,14 @@ func getRecentUnmetScheduleTimes(sj batchv1beta1.CronJob, now time.Time) ([]time
 		// CronJob as last known start time.
 		earliestTime = sj.ObjectMeta.CreationTimestamp.Time
 	}
+
+	//如果指定了StartingDeadlineSeconds。
 	if sj.Spec.StartingDeadlineSeconds != nil {
 		// Controller is not going to schedule anything below this point
+		// 检查(当前时间-sj.Spec.StartingDeadlineSeconds)
 		schedulingDeadline := now.Add(-time.Second * time.Duration(*sj.Spec.StartingDeadlineSeconds))
 
+		//最近一次调度时间或创建时间不在[now-StartingDeadlineSeconds,now]之内，则使用now-StartingDeadlineSeconds作为计算时间
 		if schedulingDeadline.After(earliestTime) {
 			earliestTime = schedulingDeadline
 		}
@@ -121,6 +130,7 @@ func getRecentUnmetScheduleTimes(sj batchv1beta1.CronJob, now time.Time) ([]time
 		return []time.Time{}, nil
 	}
 
+	//从最近一次成功调度时间开始，获取每一次应当调度的时间
 	for t := sched.Next(earliestTime); !t.After(now); t = sched.Next(t) {
 		starts = append(starts, t)
 		// An object might miss several starts. For example, if
@@ -140,7 +150,7 @@ func getRecentUnmetScheduleTimes(sj batchv1beta1.CronJob, now time.Time) ([]time
 		//
 		// I've somewhat arbitrarily picked 100, as more than 80,
 		// but less than "lots".
-		if len(starts) > 100 {
+		if len(starts) > 100 { //当有太多未启动时，返回空切片和错误
 			// We can't get the most recent times so just return an empty slice
 			return []time.Time{}, fmt.Errorf("too many missed start time (> 100). Set or decrease .spec.startingDeadlineSeconds or check clock skew")
 		}

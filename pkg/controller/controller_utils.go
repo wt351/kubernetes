@@ -535,6 +535,9 @@ func (r RealPodControl) CreatePodsOnNode(nodeName, namespace string, template *v
 	return r.createPods(nodeName, namespace, template, object, controllerRef)
 }
 
+// PatchType: 4个
+// StrategicMergePatchType: 例，新声明文件比原文件多了一个容器。原先的容器会保留，新增的容器和原先的容器合并。
+// MergePatchType: 用新声明文件的容器列表完全替换原文件。
 func (r RealPodControl) PatchPod(namespace, name string, data []byte) error {
 	_, err := r.KubeClient.CoreV1().Pods(namespace).Patch(name, types.StrategicMergePatchType, data)
 	return err

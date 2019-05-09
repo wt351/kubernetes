@@ -63,15 +63,17 @@ func updateReplicaSetStatus(c appsclient.ReplicaSetInterface, rs *apps.ReplicaSe
 			fmt.Sprintf("sequence No: %v->%v", rs.Status.ObservedGeneration, newStatus.ObservedGeneration))
 
 		rs.Status = newStatus
+		//与api server交互 更新对象
 		updatedRS, updateErr = c.UpdateStatus(rs)
-		if updateErr == nil {
+		if updateErr == nil { //无错，则立刻返回
 			return updatedRS, nil
 		}
 		// Stop retrying if we exceed statusUpdateRetries - the replicaSet will be requeued with a rate limit.
-		if i >= statusUpdateRetries {
+		if i >= statusUpdateRetries { //超出重试次数，跳出循环返回错误
 			break
 		}
 		// Update the ReplicaSet with the latest resource version for the next poll
+		// 获得最新的rs来更新
 		if rs, getErr = c.Get(rs.Name, metav1.GetOptions{}); getErr != nil {
 			// If the GET fails we can't trust status.Replicas anymore. This error
 			// is bound to be more interesting than the update failure.
@@ -93,19 +95,27 @@ func calculateStatus(rs *apps.ReplicaSet, filteredPods []*v1.Pod, manageReplicas
 	readyReplicasCount := 0
 	availableReplicasCount := 0
 	templateLabel := labels.Set(rs.Spec.Template.Labels).AsSelectorPreValidated()
+	//计算各种replicas的count
 	for _, pod := range filteredPods {
+		//如果label match ，MinReadySeconds++
 		if templateLabel.Matches(labels.Set(pod.Labels)) {
 			fullyLabeledReplicasCount++
 		}
+		//如果pod ready ，readyReplicasCount++
 		if podutil.IsPodReady(pod) {
 			readyReplicasCount++
+			//如果pod可用，且距离LastTransitionTime已经过了rs.Spec.MinReadySeconds秒，那么availableReplicasCount++
 			if podutil.IsPodAvailable(pod, rs.Spec.MinReadySeconds, metav1.Now()) {
 				availableReplicasCount++
 			}
 		}
 	}
 
+	//failureCond什么时候有值：
+	//created时 quota不足, limit ranges, pod security policy, node selectors
+	//deleted时 kubelet being down 或 finalizers are failing
 	failureCond := GetCondition(rs.Status, apps.ReplicaSetReplicaFailure)
+	//当新建删除pod出错时，记录到apps.ReplicaSetReplicaFailure
 	if manageReplicasErr != nil && failureCond == nil {
 		var reason string
 		if diff := len(filteredPods) - int(*(rs.Spec.Replicas)); diff < 0 {
@@ -116,6 +126,7 @@ func calculateStatus(rs *apps.ReplicaSet, filteredPods []*v1.Pod, manageReplicas
 		cond := NewReplicaSetCondition(apps.ReplicaSetReplicaFailure, v1.ConditionTrue, reason, manageReplicasErr.Error())
 		SetCondition(&newStatus, cond)
 	} else if manageReplicasErr == nil && failureCond != nil {
+		//当新建删除pod没出错时，删除apps.ReplicaSetReplicaFailure的存在值
 		RemoveCondition(&newStatus, apps.ReplicaSetReplicaFailure)
 	}
 
